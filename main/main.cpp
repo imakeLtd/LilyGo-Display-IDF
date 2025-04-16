@@ -7,6 +7,7 @@
  *
  */
 
+#define LV_CONF_INCLUDE_SIMPLE 1
 #include <stdio.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -20,6 +21,7 @@
 #include "esp_err.h"
 #include "esp_log.h"
 #include "lvgl.h"
+#include "lv_conf.h"
 #include "amoled_driver.h"
 #include "touch_driver.h"
 #include "i2c_driver.h"
@@ -27,15 +29,22 @@
 #include "demos/lv_demos.h"
 #include "tft_driver.h"
 #include "product_pins.h"
-
+// #define LV_LVGL_H_INCLUDE_SIMPLE 1
+// #include "fonts/industry_black_100.c"
+// #include "fonts/industry_black_60.c"
+// #include "fonts/Industry_bold_60.c"
 
 static const char *TAG = "main";
 
 #define EXAMPLE_LVGL_TICK_PERIOD_MS 2
+
 #define EXAMPLE_LVGL_TASK_MAX_DELAY_MS 500
 #define EXAMPLE_LVGL_TASK_MIN_DELAY_MS 1
 #define EXAMPLE_LVGL_TASK_STACK_SIZE (4 * 1024)
 #define EXAMPLE_LVGL_TASK_PRIORITY 2
+
+#define USB_SYMBOL "\xEF\x8A\x87"
+#define WIFI_SYMBOL "\xEF\x87\xAB"
 
 static SemaphoreHandle_t lvgl_mux = NULL;
 
@@ -123,6 +132,180 @@ static void example_lvgl_port_task(void *arg)
 }
 extern "C" {
     void example_lvgl_demo_ui(lv_disp_t *disp);
+}
+
+static lv_obj_t *current_temp_label;
+static lv_obj_t *current_temp_text_label;
+static lv_obj_t *target_temp_label;
+static lv_obj_t *target_temp_text_label;
+static lv_obj_t *timer_label;
+static lv_obj_t *timer_dash1;
+static lv_obj_t *wifi_label;
+static lv_obj_t *icon_label;
+static lv_obj_t *current_unit_label;
+static lv_obj_t *target_unit_label;
+static lv_obj_t *heat_status_label;
+
+static lv_style_t current_temp_style;
+static lv_style_t subtitle_text_style;
+static lv_style_t target_temp_style;
+static lv_style_t fa_symbol_style;
+static lv_style_t timer_style;
+static lv_style_t unit_style;
+static lv_style_t unit_white_style;
+static lv_style_t style_bg;
+static lv_style_t style_indic;
+static lv_style_t heat_status_style;
+
+static void set_temp(void * bar, int32_t level)
+{
+    lv_bar_set_value((lv_obj_t *)bar, level, LV_ANIM_ON);
+    // ESP_LOGI(TAG, "Set bar value: %d", (int) level);
+    // Update the label with the heat level e.g. "HEAT\n50%", "HEAT\n%d%" -> level
+    char temp_str[20];
+    snprintf(temp_str, sizeof(temp_str), "HEAT\n%d%%", (int)level);
+    lv_label_set_text(heat_status_label, temp_str);
+}
+
+void ui_init() {
+    lv_obj_t *screen = lv_scr_act();
+    // lv_obj_set_style_bg_color(screen, lv_color_hex(0x333333), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(screen, lv_color_hex(0x000000), LV_PART_MAIN);
+
+    lv_style_init(&current_temp_style);
+    lv_style_set_text_color(&current_temp_style, lv_color_hex(0xFFFF00));
+    lv_style_set_text_font(&current_temp_style, &industry_120);
+
+    lv_style_init(&subtitle_text_style);
+    lv_style_set_text_color(&subtitle_text_style, lv_color_hex(0xFFFFFF));
+    lv_style_set_text_font(&subtitle_text_style, &lv_font_montserrat_24);
+
+    lv_style_init(&target_temp_style);
+    lv_style_set_text_color(&target_temp_style, lv_color_hex(0xFFFFFF));
+    lv_style_set_text_font(&target_temp_style, &industry_90);
+
+    lv_style_init(&fa_symbol_style);
+    lv_style_set_text_color(&fa_symbol_style, lv_color_hex(0xFFFFFF));
+    lv_style_set_text_font(&fa_symbol_style, &fa_symbol_40);
+
+    lv_style_init(&timer_style);
+    lv_style_set_text_color(&timer_style, lv_color_hex(0xFFFFFF));
+    lv_style_set_text_font(&timer_style, &industry_90);
+
+    lv_style_init(&unit_style);
+    lv_style_set_text_color(&unit_style, lv_color_hex(0xFFFF00));
+    lv_style_set_text_font(&unit_style, &industry_40);
+
+    lv_style_init(&unit_white_style);
+    lv_style_set_text_color(&unit_white_style, lv_color_hex(0xFFFFFF));
+    lv_style_set_text_font(&unit_white_style, &industry_40);
+
+    lv_style_init(&heat_status_style);
+    lv_style_set_text_color(&heat_status_style, lv_color_hex(0xFF0000));
+    lv_style_set_text_font(&heat_status_style, &lv_font_montserrat_14);
+
+    lv_style_init(&style_bg);
+    lv_style_set_border_color(&style_bg, lv_palette_main(LV_PALETTE_RED));
+    lv_style_set_border_width(&style_bg, 2);
+    lv_style_set_pad_all(&style_bg, 6); /*To make the indicator smaller*/
+    lv_style_set_radius(&style_bg, 6);
+    // lv_style_set_anim_duration(&style_bg, 1000);
+
+    lv_style_init(&style_indic);
+    lv_style_set_bg_opa(&style_indic, LV_OPA_COVER);
+    lv_style_set_bg_color(&style_indic, lv_palette_main(LV_PALETTE_RED));
+    lv_style_set_radius(&style_indic, 3);
+    // lv_style_set_bg_grad_color(&style_indic, lv_palette_main(LV_PALETTE_RED));
+    // lv_style_set_bg_grad_dir(&style_indic, LV_GRAD_DIR_VER);
+
+    current_temp_label = lv_label_create(screen);
+    lv_obj_add_style(current_temp_label, &current_temp_style, 0);
+    lv_label_set_text(current_temp_label, "89.5");
+    lv_obj_align(current_temp_label, LV_ALIGN_TOP_MID, -20, 1);
+
+    current_unit_label = lv_label_create(screen);
+    lv_obj_add_style(current_unit_label, &unit_style, 0);
+    lv_label_set_text(current_unit_label, "°C");
+    lv_obj_align(current_unit_label, LV_ALIGN_TOP_MID, 130, 2);
+
+    current_temp_text_label = lv_label_create(screen);
+    lv_obj_add_style(current_temp_text_label, &subtitle_text_style, 0);
+    lv_label_set_text(current_temp_text_label, "CURRENT TEMP");
+    lv_obj_align(current_temp_text_label, LV_ALIGN_TOP_MID, -20, 94);
+
+    target_temp_label = lv_label_create(screen);
+    lv_obj_add_style(target_temp_label, &target_temp_style, 0);
+    lv_label_set_text(target_temp_label, "94.0");
+    lv_obj_align(target_temp_label, LV_ALIGN_BOTTOM_LEFT, 10, -35);
+
+    target_unit_label = lv_label_create(screen);
+    lv_obj_add_style(target_unit_label, &unit_white_style, 0);
+    lv_label_set_text(target_unit_label, "°C");
+    lv_obj_align(target_unit_label, LV_ALIGN_BOTTOM_LEFT, 210, -70);
+
+    target_temp_text_label = lv_label_create(screen);
+    lv_obj_add_style(target_temp_text_label, &subtitle_text_style, 0);
+    lv_label_set_text(target_temp_text_label, "TARGET TEMP");
+    lv_obj_align(target_temp_text_label, LV_ALIGN_BOTTOM_LEFT, 22, 0);
+
+    timer_label = lv_label_create(screen);
+    lv_obj_add_style(timer_label, &timer_style, 0);
+    lv_label_set_text(timer_label, "5:36");
+    lv_obj_align(timer_label, LV_ALIGN_BOTTOM_RIGHT, -60, -35);
+
+    timer_dash1 = lv_label_create(screen);
+    lv_obj_add_style(timer_dash1, &subtitle_text_style, 0);
+    lv_label_set_text(timer_dash1, "TIME LEFT");
+    lv_obj_align(timer_dash1, LV_ALIGN_BOTTOM_RIGHT, -90, 0);
+
+    wifi_label = lv_label_create(screen);
+    lv_obj_add_style(wifi_label, &fa_symbol_style, 0);
+    lv_label_set_text(wifi_label, WIFI_SYMBOL);
+    lv_obj_align(wifi_label, LV_ALIGN_TOP_LEFT, 5, 5);
+
+    heat_status_label = lv_label_create(screen);
+    lv_obj_add_style(heat_status_label, &heat_status_style, 0);
+    lv_label_set_text(heat_status_label, "HEAT\nPOWER");
+    lv_obj_align(heat_status_label, LV_ALIGN_TOP_RIGHT, -3, 0);
+    lv_obj_set_style_text_align(heat_status_label, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+
+    lv_obj_t * bar = lv_bar_create(screen);
+    lv_obj_remove_style_all(bar);  /*To have a clean start*/
+    lv_obj_add_style(bar, &style_bg, 0);
+    lv_obj_add_style(bar, &style_indic, LV_PART_INDICATOR);
+    lv_obj_set_size(bar, 40, 205);
+    // lv_obj_center(bar);
+    lv_obj_align(bar, LV_ALIGN_BOTTOM_RIGHT, -2, 0);
+    lv_bar_set_range(bar, 0, 100);
+
+    lv_anim_t a;
+    lv_anim_init(&a);
+    lv_anim_set_exec_cb(&a, set_temp);
+    // lv_anim_set_duration(&a, 3000);
+    // lv_anim_set_reverse_duration(&a, 3000);
+    lv_anim_set_time(&a, 5000); // Sets the total duration
+    lv_anim_set_playback_time(&a, 5000); // Sets the reverse duration
+    lv_anim_set_var(&a, bar);
+    lv_anim_set_values(&a, 0, 100);
+    lv_anim_set_repeat_count(&a, LV_ANIM_REPEAT_INFINITE);
+    lv_anim_start(&a);
+}
+
+void ui_update() {
+    static int current_temp = 80;
+    static int time = 0;
+    char temp_str[20];
+    snprintf(temp_str, sizeof(temp_str), "%d.%d", current_temp, 5);
+    lv_label_set_text(current_temp_label, temp_str);
+
+    current_temp++;
+    time++;
+    if (current_temp > 98) {
+        current_temp = 60;
+    }
+    if (time > 200) {
+        time = 0;
+    }
 }
 
 extern "C" void app_main(void)
@@ -214,16 +397,8 @@ extern "C" void app_main(void)
     ESP_LOGI(TAG, "Display LVGL");
     // Lock the mutex due to the LVGL APIs are not thread-safe
     if (example_lvgl_lock(-1)) {
-
-// #if   CONFIG_USE_DEMO_WIDGETS
-        // lv_demo_widgets();
-// #elif CONFIG_USE_DEMO_BENCHMARK
-        // lv_demo_benchmark();
-// #elif CONFIG_USE_DEMO_STRESS
-//         lv_demo_stress();
-// #elif CONFIG_USE_DEMO_MUSIC
-        lv_demo_music();
-// #endif
+        ESP_LOGI(TAG, "Initialize UI");
+        ui_init();
         // Release the mutex
         example_lvgl_unlock();
     }
@@ -231,5 +406,14 @@ extern "C" void app_main(void)
     ESP_LOGI(TAG, "Create LVGL task");
     // xTaskCreate(example_lvgl_port_task, "LVGL", EXAMPLE_LVGL_TASK_STACK_SIZE, NULL, EXAMPLE_LVGL_TASK_PRIORITY, NULL);
     xTaskCreate(example_lvgl_port_task, "LVGL", EXAMPLE_LVGL_TASK_STACK_SIZE, NULL, tskIDLE_PRIORITY, NULL);
+
+
+    esp_timer_handle_t ui_timer;
+    const esp_timer_create_args_t ui_timer_args = {
+        .callback = (void (*)(void*))ui_update,
+        .name = "ui_timer"
+    };
+    esp_timer_create(&ui_timer_args, &ui_timer);
+    esp_timer_start_periodic(ui_timer, 1000000); // 1 second
 
 }

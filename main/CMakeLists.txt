@@ -13,4 +13,11 @@ idf_component_register(SRCS
     "display_hmi.c"
     "display_rgb.cpp"
     "display_watch_s3.c"
+    "fonts/industry_black_100.c"
+    "fonts/industry_black_80.c"
+    "fonts/industry_120.c"
+    "fonts/industry_90.c"
+    "fonts/industry_60.c"
+    "fonts/industry_40.c"
+    "fonts/fa_symbol_40.c"
     INCLUDE_DIRS ".")
